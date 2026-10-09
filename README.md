@@ -182,3 +182,11 @@ pytest -v
 ## License
 
 MIT
+
+## Interface
+
+```bash
+python run.py
+```
+
+Opens the local Streamlit workspace on port 8501. Demo paths work without GPU, webcam, or a paid API. `streamlit run src/app.py` is equivalent.

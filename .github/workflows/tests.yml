@@ -12,5 +12,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -r requirements.txt
-      - run: export PYTHONPATH=. && pytest -v
+          cache: pip
+      - run: python -m pip install --upgrade pip && pip install -r requirements-dev.txt
+      - run: ruff check src/app.py src/ui_theme.py run.py tests/test_ui_smoke.py
+      - run: bandit -q -r src/app.py run.py -ll
+      - run: pytest -q
+        env:
+          PYTHONPATH: .

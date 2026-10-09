@@ -1,64 +1,72 @@
-"""Streamlit UI for ECDAT."""
+"""ECDAT findings workspace."""
 from __future__ import annotations
-
 import sys
+from dataclasses import asdict
 from pathlib import Path
-
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
-
-import streamlit as st
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 import pandas as pd
-
-from src.scanner import CryptoScanner
-from src.inventory import build_inventory, post_quantum_readiness, inventory_to_dict
+import streamlit as st
 from src.cbom import cbom_to_json
-from src.tls_scan import scan_tls_endpoint, scan_tls_offline_demo, results_to_json
+from src.inventory import build_inventory, inventory_to_dict, post_quantum_readiness
+from src.scanner import CryptoScanner
+from src.tls_scan import results_to_json, scan_tls_offline_demo
+from src.ui_theme import theme_css
 
-st.set_page_config(page_title="ECDAT", page_icon="🔐", layout="wide")
-st.title("🔐 Enterprise Cryptographic Discovery & Analysis Tool")
-st.caption("Offline static crypto scan · Inventory · PQ readiness · CBOM · TLS probe")
+def _scan(path_str: str) -> list[dict]:
+    scanner = CryptoScanner()
+    p = Path(path_str)
+    if not p.exists():
+        return []
+    findings = scanner.scan_file(p) if p.is_file() else scanner.scan_directory(p)
+    rows = []
+    for f in findings:
+        row = asdict(f)
+        row["severity"] = str(row["severity"])
+        row["confidence"] = str(row["confidence"])
+        rows.append(row)
+    return rows
 
-scanner = CryptoScanner()
-demo_dir = ROOT / "data" / "sample" / "vulnerable_app"
-
-tab1, tab2, tab3, tab4 = st.tabs(["Source scan", "Inventory / PQ", "TLS", "CBOM export"])
-
-with tab1:
-    path_str = st.text_input("Path to scan", value=str(demo_dir))
-    if st.button("Scan"):
-        p = Path(path_str)
-        findings = scanner.scan_file(p) if p.is_file() else (scanner.scan_directory(p) if p.is_dir() else [])
-        if not p.exists():
-            st.error("Path not found")
-        else:
-            st.session_state["findings"] = findings
-            st.success(f"{len(findings)} findings")
-            if findings:
-                st.dataframe(pd.DataFrame([f.__dict__ for f in findings]), use_container_width=True)
-                st.download_button("Download HTML report", scanner.to_html(findings), file_name="ecdat_report.html")
-
-with tab2:
-    findings = st.session_state.get("findings") or []
-    if not findings and demo_dir.exists():
-        findings = scanner.scan_directory(demo_dir)
-    inv = build_inventory(findings)
+def main() -> None:
+    st.set_page_config(page_title="ECDAT", layout="wide")
+    st.markdown(theme_css("#d06a4f"), unsafe_allow_html=True)
+    demo = ROOT / "data" / "sample" / "vulnerable_app"
+    st.markdown('<div class="top"><div><div class="kicker">Cryptographic discovery</div><p class="title">ECDAT</p></div><div class="pill">Offline rules · local files</div></div>', unsafe_allow_html=True)
+    path = st.sidebar.text_input("Scan path", value=str(demo))
+    if st.sidebar.button("Scan", type="primary"):
+        st.session_state["rows"] = _scan(path)
+    rows = st.session_state.get("rows")
+    if rows is None and demo.exists():
+        rows = _scan(str(demo))
+        st.session_state["rows"] = rows
+    rows = rows or []
+    if not rows:
+        st.markdown('<div class="panel"><p class="muted">No findings yet. Point the scan at a source tree or generate the sample app.</p></div>', unsafe_allow_html=True)
+        return
+    df = pd.DataFrame(rows)
+    counts = df["severity"].value_counts().to_dict() if "severity" in df else {}
+    critical = int(counts.get("critical", 0) + counts.get("Severity.CRITICAL", 0))
+    st.markdown(f'<div class="panel"><div class="kicker">Primary</div><p class="title">{critical} critical · {len(df)} findings</p><p class="muted">Highest severity first. Evidence stays on this machine.</p></div>', unsafe_allow_html=True)
+    order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+    if "severity" in df:
+        df = df.assign(_o=df["severity"].map(lambda s: order.get(str(s), 9))).sort_values("_o").drop(columns="_o")
+    st.dataframe(df, use_container_width=True, hide_index=True)
+    # rebuild objects only for inventory helpers via a fresh scan (cached in session)
+    scanner = CryptoScanner()
+    p = Path(path)
+    findings = scanner.scan_file(p) if p.is_file() else scanner.scan_directory(p) if p.exists() else []
     pq = post_quantum_readiness(findings)
-    st.metric("PQ readiness score", pq["score"], help=pq["notes"])
-    st.write("Band:", pq["band"])
-    st.dataframe(pd.DataFrame(inventory_to_dict(inv)), use_container_width=True)
-
-with tab3:
-    offline = st.checkbox("Offline demo TLS result (no network)", value=True)
-    host = st.text_input("Host", value="demo.local")
-    port = st.number_input("Port", value=443, min_value=1, max_value=65535)
-    if st.button("Probe TLS"):
-        res = scan_tls_offline_demo(host, int(port)) if offline else scan_tls_endpoint(host, int(port))
-        st.json(res.__dict__)
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown(f'<div class="panel"><div class="kicker">Post-quantum readiness</div><p class="title">{pq.get("score")}</p><p class="muted">{pq.get("band")} · {pq.get("notes")}</p></div>', unsafe_allow_html=True)
+        st.dataframe(pd.DataFrame(inventory_to_dict(build_inventory(findings))), use_container_width=True, hide_index=True)
+    with c2:
+        st.markdown('<div class="panel"><div class="kicker">TLS</div><p class="muted">Default probe is an offline demo result. Live TLS is optional.</p></div>', unsafe_allow_html=True)
+        res = scan_tls_offline_demo()
+        st.json({k: v for k, v in res.__dict__.items() if k != "findings"} if hasattr(res, "__dict__") else {})
+        st.download_button("CBOM JSON", cbom_to_json(findings, project_name="ecdat"), file_name="cbom.json")
         st.download_button("TLS JSON", results_to_json([res]), file_name="tls.json")
 
-with tab4:
-    findings = st.session_state.get("findings") or (scanner.scan_directory(demo_dir) if demo_dir.exists() else [])
-    cbom = cbom_to_json(findings, project_name="ecdat-demo")
-    st.code(cbom[:2000] + ("…" if len(cbom) > 2000 else ""), language="json")
-    st.download_button("Download CBOM JSON", cbom, file_name="cbom.json")
+if __name__ == "__main__":
+    main()
