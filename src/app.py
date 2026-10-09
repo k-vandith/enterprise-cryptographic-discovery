@@ -51,7 +51,7 @@ def main() -> None:
     order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
     if "severity" in df:
         df = df.assign(_o=df["severity"].map(lambda s: order.get(str(s), 9))).sort_values("_o").drop(columns="_o")
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    st.dataframe(df, width="stretch", hide_index=True)
     # rebuild objects only for inventory helpers via a fresh scan (cached in session)
     scanner = CryptoScanner()
     p = Path(path)
@@ -60,7 +60,7 @@ def main() -> None:
     c1, c2 = st.columns(2)
     with c1:
         st.markdown(f'<div class="panel"><div class="kicker">Post-quantum readiness</div><p class="title">{pq.get("score")}</p><p class="muted">{pq.get("band")} · {pq.get("notes")}</p></div>', unsafe_allow_html=True)
-        st.dataframe(pd.DataFrame(inventory_to_dict(build_inventory(findings))), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(inventory_to_dict(build_inventory(findings))), width="stretch", hide_index=True)
     with c2:
         st.markdown('<div class="panel"><div class="kicker">TLS</div><p class="muted">Default probe is an offline demo result. Live TLS is optional.</p></div>', unsafe_allow_html=True)
         res = scan_tls_offline_demo()
