@@ -6,7 +6,7 @@ from html import escape
 from io import BytesIO
 from typing import Any, Iterable
 
-from src.scanner import Finding, Severity
+from src.scanner import Finding
 
 
 def build_pdf_report(
@@ -21,9 +21,7 @@ def build_pdf_report(
         from reportlab.lib.pagesizes import landscape, letter
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
         from reportlab.lib.units import inch
-        from reportlab.platypus import (
-            Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle, KeepTogether,
-        )
+        from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
     except ImportError as exc:
         raise RuntimeError("PDF export needs ReportLab. Install it with: python -m pip install reportlab") from exc
 
