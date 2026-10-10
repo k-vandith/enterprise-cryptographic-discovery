@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import html
 import ipaddress
 import re
 import sys
@@ -231,7 +232,7 @@ def _render_results_summary(findings: list[Finding]) -> None:
         _metric_card("Legacy-pattern score", f"{pq['score']}/100", "Heuristic only · not certification")
     note_class = "danger" if critical_high else ""
     st.markdown(
-        f"<div class='cs-note {note_class}'><b>Key takeaway</b><br>{_summary_takeaway(findings)}</div>",
+        f"<div class='cs-note {note_class}'><b>Key takeaway</b><br>{html.escape(_summary_takeaway(findings))}</div>",
         unsafe_allow_html=True,
     )
     st.caption(
@@ -279,7 +280,7 @@ def _render_top_findings(findings: list[Finding], limit: int = 5) -> None:
         css_class = "danger" if level in {"critical", "high"} else ("warn" if level == "medium" else "")
         st.markdown(
             f"<div class='cs-note {css_class}'><span class='cs-badge'>{level.upper()}</span>"
-            f"<b>{item.title}</b><div class='cs-muted'>{item.file}:{item.line} · {item.rule_id}</div>"
+            f"<b>{item.title}</b><div class='cs-muted'>{html.escape(item.file)}:{item.line} · {html.escape(item.rule_id)}</div>"
             f"<p>{RULE_EXPLANATIONS.get(item.rule_id, 'Review this pattern in context.')}</p>"
             f"<div class='cs-muted'><b>Next step:</b> {item.remediation}</div></div>",
             unsafe_allow_html=True,
@@ -571,7 +572,7 @@ def _findings_page(findings: list[Finding]) -> None:
         st.download_button("Download empty findings CSV", "Severity,Finding,Rule,File,Line\n",
                            file_name="cipherscope-findings.csv", mime="text/csv")
         return
-    st.markdown(f"**{len(findings):,} matched pattern(s)** from {st.session_state.get('source_label')}.")
+    st.caption(f"{len(findings):,} matched pattern(s) · Source: {st.session_state.get('source_label')}")
     rows = _finding_rows(findings)
     df = pd.DataFrame(rows)
     c1, c2 = st.columns([1, 1.5])
@@ -602,7 +603,7 @@ def _findings_page(findings: list[Finding]) -> None:
         takeaway += f"First visible result: {highest['Finding']} in {highest['File']}:{highest['Line']}."
     else:
         takeaway += "No rows match the current filters."
-    st.markdown(f"<div class='cs-note'><b>Key takeaway</b><br>{takeaway}</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='cs-note'><b>Key takeaway</b><br>{html.escape(takeaway)}</div>", unsafe_allow_html=True)
     st.download_button(
         "Download filtered findings CSV", view.to_csv(index=False).encode("utf-8"),
         file_name="cipherscope-findings.csv", mime="text/csv",
