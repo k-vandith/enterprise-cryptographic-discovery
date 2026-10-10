@@ -66,7 +66,7 @@ DEFAULT_RULES: list[Rule] = [
     Rule("WEAK-ECB", "ECB mode detected", re.compile(r"MODE_ECB|AES/ECB|[\"']ECB[\"']|aes[^\n]{0,40}ecb", re.I), Severity.HIGH, Confidence.DETECTED, "mode", "Avoid ECB because it reveals repeated data patterns; use an authenticated encryption mode."),
     Rule("SSL-V2V3", "SSLv2 / SSLv3 reference", re.compile(r"SSLv[23]|PROTOCOL_SSLv[23]", re.I), Severity.CRITICAL, Confidence.DETECTED, "tls", "Disable SSLv2 and SSLv3; use a supported TLS version."),
     Rule("TLS10", "TLS 1.0 reference", re.compile(r"TLSv1(?:\.0)?\b|PROTOCOL_TLSv1\b|TLS1_VERSION", re.I), Severity.HIGH, Confidence.SUSPICIOUS, "tls", "Prefer TLS 1.2 or TLS 1.3 and verify compatibility before removing legacy support."),
-    Rule("HARDCODED-KEY", "Possible hardcoded key or secret", re.compile(r"(api[_-]?key|secret[_-]?key|private[_-]?key|client[_-]?secret)\s*[:=]\s*[\"'][^\"']{8,}[\"']", re.I), Severity.CRITICAL, Confidence.SUSPICIOUS, "secrets", "If the value is real, rotate it and move secret material to a secret manager or environment variable."),
+    Rule("HARDCODED-KEY", "Possible hardcoded key or secret", re.compile(r"""(?i)(api[_-]?key|secret[_-]?key|private[_-]?key|client[_-]?secret)\s*[:=]\s*(?:"[^"]{8,}"|'[^']{8,}'|[^\s#;]{8,})"""), Severity.CRITICAL, Confidence.SUSPICIOUS, "secrets", "If the value is real, rotate it and move secret material to a secret manager or environment variable."),
     Rule("PRIVATE-KEY-MATERIAL", "Private key material present", re.compile(r"-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----", re.I), Severity.CRITICAL, Confidence.DETECTED, "secrets", "Treat the key as exposed: revoke or rotate it, remove it from active use, and review repository history."),
     Rule("CERTIFICATE-MATERIAL", "X.509 certificate material present", re.compile(r"-----BEGIN CERTIFICATE-----", re.I), Severity.INFO, Confidence.DETECTED, "certificate", "Review the certificate subject, issuer, validity dates, and deployment context."),
     Rule("RSA-1024", "RSA key size ≤ 1024", re.compile(r"RSA.*(1024|512)|key_size\s*=\s*(512|1024)", re.I), Severity.HIGH, Confidence.SUSPICIOUS, "asymmetric", "Use RSA at 2048 bits or stronger, or evaluate an appropriate modern alternative."),
@@ -95,10 +95,12 @@ class CryptoScanner:
                     evidence = line.strip()[:200]
                     if rule.id == "HARDCODED-KEY":
                         evidence = re.sub(
-                            r"""(?i)(api[_-]?key|secret[_-]?key|private[_-]?key|client[_-]?secret)(\s*[:=]\s*)(['"])[^'"]*\3""",
+                            r"""(?i)(api[_-]?key|secret[_-]?key|private[_-]?key|client[_-]?secret)(\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s#;]+)""",
                             r'\1\2"[REDACTED]"',
                             evidence,
                         )
+                    elif rule.id == "PRIVATE-KEY-MATERIAL":
+                        evidence = "[REDACTED: private key material detected]"
                     findings.append(
                         Finding(
                             rule_id=rule.id,
