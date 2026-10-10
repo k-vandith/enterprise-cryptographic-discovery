@@ -151,7 +151,6 @@ def _scan_sample() -> None:
         write_sample_case(root)
         _store_scan(root, "Synthetic training sample")
     st.session_state["source_label"] = "Synthetic training sample"
-    st.session_state["navigation"] = "Overview"
 
 
 def _page_intro(title: str, purpose: str, how_to: str) -> None:
@@ -327,6 +326,8 @@ def _parse_host_entry(value: str) -> tuple[str, int]:
         parsed = urlsplit("//" + raw)
         if parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
             raise ValueError("Enter only a hostname and optional port.")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("Do not include usernames or passwords in a TLS target.")
     host = parsed.hostname
     try:
         port = parsed.port or 443
@@ -371,9 +372,8 @@ def _overview(findings: list[Finding]) -> None:
                 _scan_sample()
                 st.rerun()
         with c2:
-            if st.button("Upload my files", use_container_width=True, help="Open the upload and scan workspace."):
-                _go_to("Scan files")
-                st.rerun()
+            st.button("Upload my files", use_container_width=True, help="Open the upload and scan workspace.",
+                      on_click=_go_to, args=("Scan files",))
         st.download_button(
             "Download sample project ZIP", data=_sample_zip_bytes(),
             file_name="cipherscope-training-sample.zip", mime="application/zip",
@@ -446,6 +446,8 @@ def _scan_files_page() -> None:
                                    help="Enter a path readable by the computer running this app.")
         if st.button("Scan local path", help="Scan supported files under the local folder."):
             try:
+                if not path_value.strip():
+                    raise ValueError("Enter a local file or folder path first.")
                 with st.spinner("Scanning the selected local path…"):
                     _store_scan(Path(path_value).expanduser(), path_value.strip())
                 st.success(f"Scan complete. Checked {st.session_state['files_scanned']:,} supported files.")
@@ -457,9 +459,8 @@ def _scan_files_page() -> None:
         st.markdown("<div class='cs-section'><h3>Most recent scan</h3></div>", unsafe_allow_html=True)
         _render_results_summary(_findings())
         _render_top_findings(_findings(), 3)
-        if st.button("Open findings", help="Review and filter the complete finding list."):
-            _go_to("Findings")
-            st.rerun()
+        st.button("Open findings", help="Review and filter the complete finding list.",
+                  on_click=_go_to, args=("Findings",))
 
 
 def _tls_page() -> None:
@@ -563,6 +564,12 @@ def _findings_page(findings: list[Finding]) -> None:
         if st.button("Load sample case", type="primary"):
             _scan_sample()
             st.rerun()
+        return
+    if not findings:
+        st.success("No known patterns matched the current input.")
+        st.caption("A clean rule scan is not proof of security. Confirm supported file coverage and review your threat model.")
+        st.download_button("Download empty findings CSV", "Severity,Finding,Rule,File,Line\n",
+                           file_name="cipherscope-findings.csv", mime="text/csv")
         return
     st.markdown(f"**{len(findings):,} matched pattern(s)** from {st.session_state.get('source_label')}.")
     rows = _finding_rows(findings)
@@ -790,6 +797,16 @@ def _sample_zip_bytes() -> bytes:
     return data.getvalue()
 
 
+def _reset_session() -> None:
+    defaults = {
+        "navigation": "Overview", "findings": [], "certificates": [], "files_scanned": 0,
+        "source_label": "", "scan_time": "", "scan_finished": False,
+        "tls_results": [], "tls_mode": "",
+    }
+    for key, value in defaults.items():
+        st.session_state[key] = value
+
+
 def main() -> None:
     st.set_page_config(page_title="CipherScope · ECDAT", page_icon="🔐", layout="wide", initial_sidebar_state="expanded")
     _init_state()
@@ -814,11 +831,8 @@ def main() -> None:
         st.caption("Local-first · No API key")
         if st.session_state.get("scan_finished"):
             st.caption(f"{len(_findings())} matched patterns · {st.session_state.get('files_scanned', 0)} files scanned")
-        if st.button("Reset this session", help="Clear results from the current Streamlit session. It does not change original files."):
-            for key in ("findings", "certificates", "files_scanned", "source_label", "scan_time", "scan_finished", "tls_results", "tls_mode"):
-                st.session_state[key] = [] if key in {"findings", "certificates", "tls_results"} else (0 if key == "files_scanned" else (False if key == "scan_finished" else ""))
-            st.session_state["navigation"] = "Overview"
-            st.rerun()
+        st.button("Reset this session", on_click=_reset_session,
+                  help="Clear results from the current Streamlit session. It does not change original files.")
 
     st.markdown(
         "<div class='cs-topbar'><div class='cs-brand'>CIPHERSCOPE</div>"
