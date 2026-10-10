@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="CipherScope logo">
+  <rect width="128" height="128" rx="28" fill="#0b0d14"/>
+  <path d="M18 36 64 15 110 36 110 88 64 112 18 88Z" fill="#143742" stroke="#55c7d9" stroke-width="4"/>
+  <path d="M44 57v-8a20 20 0 0 1 40 0v8" fill="none" stroke="#bdebf1" stroke-width="6" stroke-linecap="round"/>
+  <rect x="34" y="54" width="60" height="43" rx="9" fill="#55c7d9"/>
+  <circle cx="64" cy="72" r="5" fill="#0b0d14"/>
+  <path d="M64 77v8" stroke="#0b0d14" stroke-width="4" stroke-linecap="round"/>
+</svg>
