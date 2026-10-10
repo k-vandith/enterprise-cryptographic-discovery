@@ -55,7 +55,10 @@ def main() -> int:
     env.setdefault("STREAMLIT_BROWSER_GATHER_USAGE_STATS", "false")
     env.setdefault("STREAMLIT_SERVER_HEADLESS", "true")
     process = subprocess.Popen(
-        [sys.executable, str(ROOT / "run.py")],
+        [
+            sys.executable, "-m", "streamlit", "run", str(ROOT / "src" / "app.py"),
+            "--server.port", "8501", "--server.headless", "true",
+        ],
         cwd=ROOT, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
     try:
