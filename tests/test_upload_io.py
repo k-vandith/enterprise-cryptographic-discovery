@@ -9,6 +9,7 @@ import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.serialization import Encoding
 from cryptography.x509.oid import NameOID
 
 from src.reports import build_pdf_report
@@ -69,7 +70,7 @@ def test_certificate_expiry_metadata(tmp_path: Path) -> None:
         .sign(key, hashes.SHA256())
     )
     cert_file = tmp_path / "training.crt"
-    cert_file.write_bytes(cert.public_bytes(__import__("cryptography").hazmat.primitives.serialization.Encoding.PEM))
+    cert_file.write_bytes(cert.public_bytes(Encoding.PEM))
 
     results = inspect_certificates([cert_file])
     assert len(results) == 1
