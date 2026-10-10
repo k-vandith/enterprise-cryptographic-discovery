@@ -88,9 +88,14 @@ def test_pdf_report_is_a_real_pdf(tmp_path: Path) -> None:
 
 
 def test_redacts_unquoted_env_secret_and_private_key_material(tmp_path: Path) -> None:
-    env_file = tmp_path / ".env"
-    env_file.write_text("API_KEY=sk-training-fake-secret-should-not-leak\n", encoding="utf-8")
+    staged_env = stage_uploads(
+        [FakeUpload(".env", b"API_KEY=sk-training-fake-secret-should-not-leak\n")],
+        tmp_path / "env-stage",
+    )
+    env_file = staged_env[0]
+    assert env_file.name == ".env"
     env_findings = CryptoScanner().scan_file(env_file)
+
     secret = next(item for item in env_findings if item.rule_id == "HARDCODED-KEY")
     assert "sk-training-fake-secret" not in secret.evidence
     assert "[REDACTED]" in secret.evidence
