@@ -52,6 +52,11 @@ No credential or key in this case is real.
 }
 
 
+def _file_extension(name: str) -> str:
+    basename = name.replace("\\", "/").rsplit("/", 1)[-1].lower()
+    return ".env" if basename == ".env" else Path(basename).suffix.lower()
+
+
 def _upload_bytes(upload: object) -> bytes:
     getter = getattr(upload, "getvalue", None)
     if callable(getter):
@@ -106,7 +111,7 @@ def _extract_zip(payload: bytes, root: Path) -> list[Path]:
             if stat.S_ISLNK(mode):
                 continue
             relative = _safe_relative_path(item.filename)
-            if relative.suffix.lower() not in SCANNABLE_EXTENSIONS:
+            if _file_extension(relative.name) not in SCANNABLE_EXTENSIONS:
                 continue
             if item.file_size > MAX_FILE_BYTES:
                 raise ValueError(f"{relative.name} exceeds the 25 MB per-file limit.")
@@ -149,7 +154,7 @@ def stage_uploads(uploads: Iterable[object], destination: str | Path) -> list[Pa
             staged.extend(_extract_zip(payload, root))
             continue
         relative = _safe_relative_path(Path(name).name)
-        if relative.suffix.lower() not in SCANNABLE_EXTENSIONS:
+        if _file_extension(relative.name) not in SCANNABLE_EXTENSIONS:
             continue
         # Avoid overwriting files when separate uploads share a basename.
         target = root / relative
