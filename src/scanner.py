@@ -58,6 +58,10 @@ class Rule:
     extensions: tuple[str, ...] = SCANNABLE_EXTENSIONS
 
 
+def _extension(path: Path) -> str:
+    return ".env" if path.name.lower() == ".env" else path.suffix.lower()
+
+
 DEFAULT_RULES: list[Rule] = [
     Rule("WEAK-MD5", "MD5 hash usage", re.compile(r"\bmd5\b|hashlib\.md5|MessageDigest\.getInstance\([\"']MD5", re.I), Severity.HIGH, Confidence.DETECTED, "hash", "Replace MD5 with SHA-256 or SHA-3."),
     Rule("WEAK-SHA1", "SHA-1 hash usage", re.compile(r"\bsha1\b|hashlib\.sha1|MessageDigest\.getInstance\([\"']SHA-?1", re.I), Severity.MEDIUM, Confidence.DETECTED, "hash", "Prefer SHA-256 or stronger where collision resistance is required."),
@@ -81,7 +85,7 @@ class CryptoScanner:
 
     def scan_file(self, path: Path) -> list[Finding]:
         findings: list[Finding] = []
-        if path.suffix.lower() not in SCANNABLE_EXTENSIONS:
+        if _extension(path) not in SCANNABLE_EXTENSIONS:
             return findings
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
@@ -89,7 +93,7 @@ class CryptoScanner:
             return findings
         for line_number, line in enumerate(text.splitlines(), 1):
             for rule in self.rules:
-                if rule.extensions and path.suffix.lower() not in rule.extensions:
+                if rule.extensions and _extension(path) not in rule.extensions:
                     continue
                 if rule.pattern.search(line):
                     evidence = line.strip()[:200]
@@ -122,7 +126,7 @@ class CryptoScanner:
         for path in root.rglob("*"):
             if not path.is_file() or any(part in skip for part in path.parts):
                 continue
-            if path.suffix.lower() not in SCANNABLE_EXTENSIONS:
+            if _extension(path) not in SCANNABLE_EXTENSIONS:
                 continue
             findings.extend(self.scan_file(path))
         return findings
