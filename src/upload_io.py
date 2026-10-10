@@ -205,7 +205,7 @@ def inspect_certificates(paths: Iterable[str | Path]) -> list[dict[str, object]]
             certs = [x509.load_pem_x509_certificate(block) for block in blocks] if blocks else [
                 x509.load_der_x509_certificate(data)
             ]
-        except (OSError, ValueError):
+        except Exception:  # Malformed or unsupported certificate files should not abort the scan.
             continue
         for cert in certs:
             subject = cert.subject.rfc4514_string() or "(no subject)"
