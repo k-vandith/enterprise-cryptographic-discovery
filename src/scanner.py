@@ -38,6 +38,8 @@ class Finding:
     category: str = "crypto"
 
 
+MAX_SCAN_FILE_BYTES = 25 * 1024 * 1024
+
 SCANNABLE_EXTENSIONS = (
     ".py", ".pyi", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".java",
     ".go", ".rs", ".c", ".h", ".cpp", ".hpp", ".cs", ".rb", ".php", ".swift",
@@ -125,28 +127,38 @@ class CryptoScanner:
     def __init__(self, rules: list[Rule] | None = None) -> None:
         self.rules = rules if rules is not None else DEFAULT_RULES
 
+    def _scan_error(self, path: Path, evidence: str) -> list[Finding]:
+        return [
+            Finding(
+                rule_id="SCAN-ERROR",
+                title="File was not fully analyzed",
+                severity=Severity.INFO,
+                confidence=Confidence.INSUFFICIENT,
+                file=str(path),
+                line=0,
+                evidence=evidence,
+                remediation="Check the file and size limits, then rescan.",
+                category="scan",
+            )
+        ]
+
     def scan_file(self, path: Path) -> list[Finding]:
         findings: list[Finding] = []
         if _extension(path) not in SCANNABLE_EXTENSIONS:
             return findings
         try:
+            size = path.stat().st_size
+        except OSError:
+            return self._scan_error(path, "File metadata could not be read; cryptographic patterns were not analyzed.")
+        if size > MAX_SCAN_FILE_BYTES:
+            return self._scan_error(
+                path,
+                f"File exceeds the {MAX_SCAN_FILE_BYTES // (1024 * 1024)} MB-per-file scan limit; not analyzed.",
+            )
+        try:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
-            # An unreadable file is not a clean scan. Emit an explicit insufficient-
-            # evidence row so the report cannot silently imply full coverage.
-            return [
-                Finding(
-                    rule_id="SCAN-ERROR",
-                    title="File could not be read",
-                    severity=Severity.INFO,
-                    confidence=Confidence.INSUFFICIENT,
-                    file=str(path),
-                    line=0,
-                    evidence="File content was unavailable; cryptographic patterns were not analyzed.",
-                    remediation="Check access permissions and file availability, then rescan.",
-                    category="scan",
-                )
-            ]
+            return self._scan_error(path, "File content was unavailable; cryptographic patterns were not analyzed.")
         for line_number, line in enumerate(text.splitlines(), 1):
             for rule in self.rules:
                 if rule.extensions and _extension(path) not in rule.extensions:
