@@ -61,3 +61,23 @@ def test_private_key_marker_is_redacted_for_overlapping_rules(tmp_path: Path):
     }
     assert all("BEGIN PRIVATE KEY" not in item.evidence for item in findings)
     assert all("random.random()" not in item.evidence for item in findings)
+
+
+
+def test_directory_scan_includes_dotenv_and_skips_only_root_relative_dependency_folders(tmp_path: Path):
+    root = tmp_path / "venv" / "project"
+    (root / "src").mkdir(parents=True)
+    (root / ".venv").mkdir()
+    (root / ".env").write_text('API_KEY="training-secret-value-123456"\n', encoding="utf-8")
+    (root / "src" / "auth.py").write_text("hashlib.md5(b'demo')\n", encoding="utf-8")
+    (root / ".venv" / "ignored.py").write_text("hashlib.md5(b'ignored')\n", encoding="utf-8")
+    (root / "notes.exe").write_text("hashlib.md5(b'unsupported')\n", encoding="utf-8")
+
+    paths = {path.relative_to(root).as_posix() for path in iter_scannable_files(root)}
+    assert paths == {".env", "src/auth.py"}
+    assert not is_scannable_path(root / "notes.exe")
+
+    findings = CryptoScanner().scan_directory(root)
+    assert any(item.rule_id == "HARDCODED-KEY" and item.file.endswith(".env") for item in findings)
+    assert any(item.rule_id == "WEAK-MD5" and item.file.endswith("auth.py") for item in findings)
+    assert all("ignored.py" not in item.file for item in findings)
