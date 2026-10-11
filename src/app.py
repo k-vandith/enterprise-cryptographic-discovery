@@ -23,7 +23,7 @@ import streamlit as st
 from src.cbom import cbom_to_json
 from src.inventory import build_inventory, inventory_to_dict, post_quantum_readiness
 from src.reports import build_pdf_report
-from src.scanner import CryptoScanner, Finding, SCANNABLE_EXTENSIONS
+from src.scanner import CryptoScanner, Finding, SCANNABLE_EXTENSIONS, is_scannable_path, iter_scannable_files
 from src.tls_scan import TLSResult, results_to_json, scan_tls_endpoint, scan_tls_offline_demo
 from src.ui_theme import theme_css
 from src.upload_io import inspect_certificates, stage_uploads, write_sample_case, SAMPLE_FILES
@@ -99,16 +99,17 @@ def _store_scan(root: Path, label: str) -> None:
     root = root.resolve()
     scanner = CryptoScanner()
     if root.is_file():
+        if not is_scannable_path(root):
+            raise ValueError(
+                f"Unsupported file type for scanning: {root.name}. "
+                "Choose a supported source, configuration, text, or certificate file."
+            )
         findings = scanner.scan_file(root)
         file_count = 1
         for item in findings:
             item.file = root.name
     elif root.is_dir():
-        candidates = [
-            item for item in root.rglob("*")
-            if item.is_file() and item.suffix.lower() in SCANNABLE_EXTENSIONS
-            and not any(part in {".git", ".venv", "venv", "node_modules", "__pycache__"} for part in item.parts)
-        ]
+        candidates = list(iter_scannable_files(root))
         if len(candidates) > 10_000:
             raise ValueError("This folder contains more than 10,000 supported files. Narrow the folder and scan again.")
         file_count = len(candidates)
