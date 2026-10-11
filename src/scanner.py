@@ -109,7 +109,7 @@ def is_scannable_path(path: Path) -> bool:
 
 def iter_scannable_files(root: Path) -> Iterator[Path]:
     """Yield supported files while skipping generated folders within the selected scan root."""
-    for path in root.rglob("*"):
+    for path in sorted(root.rglob("*"), key=lambda item: item.relative_to(root).as_posix().casefold()):
         if not path.is_file() or not is_scannable_path(path):
             continue
         try:
