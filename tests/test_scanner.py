@@ -1,5 +1,5 @@
 from pathlib import Path
-from src.scanner import CryptoScanner, Severity, is_scannable_path, iter_scannable_files
+from src.scanner import Confidence, CryptoScanner, Severity, is_scannable_path, iter_scannable_files
 
 
 def test_scan_md5(tmp_path: Path):
