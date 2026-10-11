@@ -38,6 +38,8 @@ class Finding:
     category: str = "crypto"
 
 
+MAX_SCAN_FILE_BYTES = 25 * 1024 * 1024
+
 SCANNABLE_EXTENSIONS = (
     ".py", ".pyi", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".java",
     ".go", ".rs", ".c", ".h", ".cpp", ".hpp", ".cs", ".rb", ".php", ".swift",
@@ -109,7 +111,7 @@ def is_scannable_path(path: Path) -> bool:
 
 def iter_scannable_files(root: Path) -> Iterator[Path]:
     """Yield supported files while skipping generated folders within the selected scan root."""
-    for path in root.rglob("*"):
+    for path in sorted(root.rglob("*"), key=lambda item: item.relative_to(root).as_posix().casefold()):
         if not path.is_file() or not is_scannable_path(path):
             continue
         try:
@@ -125,14 +127,38 @@ class CryptoScanner:
     def __init__(self, rules: list[Rule] | None = None) -> None:
         self.rules = rules if rules is not None else DEFAULT_RULES
 
+    def _scan_error(self, path: Path, evidence: str) -> list[Finding]:
+        return [
+            Finding(
+                rule_id="SCAN-ERROR",
+                title="File was not fully analyzed",
+                severity=Severity.INFO,
+                confidence=Confidence.INSUFFICIENT,
+                file=str(path),
+                line=0,
+                evidence=evidence,
+                remediation="Check the file and size limits, then rescan.",
+                category="scan",
+            )
+        ]
+
     def scan_file(self, path: Path) -> list[Finding]:
         findings: list[Finding] = []
         if _extension(path) not in SCANNABLE_EXTENSIONS:
             return findings
         try:
+            size = path.stat().st_size
+        except OSError:
+            return self._scan_error(path, "File metadata could not be read; cryptographic patterns were not analyzed.")
+        if size > MAX_SCAN_FILE_BYTES:
+            return self._scan_error(
+                path,
+                f"File exceeds the {MAX_SCAN_FILE_BYTES // (1024 * 1024)} MB-per-file scan limit; not analyzed.",
+            )
+        try:
             text = path.read_text(encoding="utf-8", errors="replace")
-        except (OSError, UnicodeError):
-            return findings
+        except OSError:
+            return self._scan_error(path, "File content was unavailable; cryptographic patterns were not analyzed.")
         for line_number, line in enumerate(text.splitlines(), 1):
             for rule in self.rules:
                 if rule.extensions and _extension(path) not in rule.extensions:
@@ -190,7 +216,7 @@ class CryptoScanner:
             f"<div class='metric'><span class='muted'>{_esc(level.title())}</span><b>{counts[level]}</b></div>"
             for level in ("critical", "high", "medium", "low", "info")
         )
-        table_rows = "".join(rows) or '<tr><td colspan="6">No matching patterns were found in the scanned files.</td></tr>'
+        table_rows = "".join(rows) or '<tr><td colspan="6">No configured patterns matched. This is not proof that the code or files are cryptographically safe.</td></tr>'
         return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{escaped_title}</title>

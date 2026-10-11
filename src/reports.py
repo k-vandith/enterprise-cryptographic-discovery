@@ -112,7 +112,7 @@ def build_pdf_report(
     if len(ordered) > report_limit:
         story.append(Paragraph(f"Showing the first {report_limit} findings of {len(ordered)} total.", styles["CSSubtitle"]))
     if not ordered:
-        story.append(Paragraph("No matching patterns were found in the scanned files.", styles["Normal"]))
+        story.append(Paragraph("No configured patterns matched. This does not establish cryptographic safety or rule out issues that these patterns cannot detect.", styles["Normal"]))
 
     if certs:
         story.append(Paragraph("Local certificate validity", styles["CSHeading"]))

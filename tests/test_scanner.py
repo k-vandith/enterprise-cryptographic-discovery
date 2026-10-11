@@ -1,5 +1,5 @@
 from pathlib import Path
-from src.scanner import CryptoScanner, Severity, is_scannable_path, iter_scannable_files
+from src.scanner import Confidence, CryptoScanner, Severity, is_scannable_path, iter_scannable_files
 
 
 def test_scan_md5(tmp_path: Path):
@@ -117,3 +117,56 @@ def test_directory_scan_is_relative_to_selected_root_even_when_parent_is_named_v
     assert any(item.rule_id == "HARDCODED-KEY" and item.file.endswith(".env") for item in findings)
     assert any(item.rule_id == "WEAK-MD5" and item.file.endswith("auth.py") for item in findings)
     assert all("ignored.py" not in item.file for item in findings)
+
+
+
+def test_directory_scan_order_is_stable_by_relative_path(tmp_path: Path):
+    (tmp_path / "z-last.py").write_text("hashlib.md5(b'x')\n", encoding="utf-8")
+    (tmp_path / "a-first.py").write_text("hashlib.sha1(b'x')\n", encoding="utf-8")
+
+    findings = CryptoScanner().scan_directory(tmp_path)
+
+    assert [Path(item.file).name for item in findings] == ["a-first.py", "z-last.py"]
+
+
+
+def test_empty_scan_report_does_not_claim_the_files_are_safe():
+    report = CryptoScanner().to_html([])
+
+    assert "No configured patterns matched" in report
+    assert "not proof" in report
+    assert "cryptographically safe" in report
+
+
+
+def test_unreadable_file_is_reported_as_not_scanned(tmp_path: Path, monkeypatch):
+    source = tmp_path / "locked.py"
+    source.write_text("hashlib.md5(data)\n", encoding="utf-8")
+    original = Path.read_text
+
+    def denied(path: Path, *args, **kwargs):
+        if path == source:
+            raise PermissionError("test permission error")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", denied)
+    findings = CryptoScanner().scan_file(source)
+
+    assert len(findings) == 1
+    assert findings[0].rule_id == "SCAN-ERROR"
+    assert findings[0].confidence == Confidence.INSUFFICIENT
+    assert "not analyzed" in findings[0].evidence
+
+
+
+def test_oversized_path_scan_is_reported_as_not_analyzed(tmp_path: Path, monkeypatch):
+    source = tmp_path / "large.py"
+    source.write_text("x" * 9, encoding="utf-8")
+    monkeypatch.setattr("src.scanner.MAX_SCAN_FILE_BYTES", 8)
+
+    findings = CryptoScanner().scan_file(source)
+
+    assert len(findings) == 1
+    assert findings[0].rule_id == "SCAN-ERROR"
+    assert findings[0].confidence == Confidence.INSUFFICIENT
+    assert "per-file scan limit" in findings[0].evidence
