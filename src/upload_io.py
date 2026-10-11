@@ -91,6 +91,26 @@ def _write_under(root: Path, relative: Path, payload: bytes) -> Path:
     return target
 
 
+def _unique_target(root: Path, relative: Path) -> Path:
+    """Choose a non-existing output path without overwriting earlier uploads."""
+    target = root / relative
+    if not target.exists():
+        return target
+
+    if relative.name.lower() == ".env":
+        stem, suffix = "env", ".env"
+    else:
+        stem, suffix = relative.stem, relative.suffix
+
+    index = 2
+    while True:
+        candidate = relative.with_name(f"{stem}-{index}{suffix}")
+        target = root / candidate
+        if not target.exists():
+            return target
+        index += 1
+
+
 def _extract_zip(payload: bytes, root: Path) -> list[Path]:
     try:
         archive = zipfile.ZipFile(io.BytesIO(payload))
@@ -122,7 +142,8 @@ def _extract_zip(payload: bytes, root: Path) -> list[Path]:
                 contents = archive.read(item)
             except (RuntimeError, zipfile.BadZipFile) as exc:
                 raise ValueError(f"Could not read {relative.name} from the archive.") from exc
-            staged.append(_write_under(root, relative, contents))
+            target = _unique_target(root, relative)
+            staged.append(_write_under(root, target.relative_to(root), contents))
     return staged
 
 
@@ -156,12 +177,8 @@ def stage_uploads(uploads: Iterable[object], destination: str | Path) -> list[Pa
         relative = _safe_relative_path(Path(name).name)
         if _file_extension(relative.name) not in SCANNABLE_EXTENSIONS:
             continue
-        # Avoid overwriting files when separate uploads share a basename.
-        target = root / relative
-        suffix = 2
-        while target.exists():
-            target = target.with_name(f"{relative.stem}-{suffix}{relative.suffix}")
-            suffix += 1
+        # Preserve every upload even when filenames collide.
+        target = _unique_target(root, relative)
         staged.append(_write_under(root, target.relative_to(root), payload))
 
     if not staged:
@@ -224,7 +241,14 @@ def inspect_certificates(paths: Iterable[str | Path]) -> list[dict[str, object]]
             except AttributeError:
                 valid_from = cert.not_valid_before.replace(tzinfo=timezone.utc)
             days = (expiry - now).days
-            status = "Expired" if days < 0 else ("Renew soon" if days < 30 else "Active")
+            if valid_from > now:
+                status = "Not yet valid"
+            elif days < 0:
+                status = "Expired"
+            elif days < 30:
+                status = "Renew soon"
+            else:
+                status = "Active"
             key = (str(path), cert.serial_number.__str__())
             if key in seen:
                 continue

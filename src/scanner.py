@@ -4,6 +4,7 @@ from __future__ import annotations
 import html
 import json
 import re
+from collections.abc import Iterator
 from dataclasses import asdict, dataclass
 from enum import Enum
 from pathlib import Path
@@ -69,7 +70,7 @@ DEFAULT_RULES: list[Rule] = [
     Rule("WEAK-RC4", "RC4 stream cipher", re.compile(r"\bRC4\b|ARC4|arcfour", re.I), Severity.CRITICAL, Confidence.DETECTED, "cipher", "RC4 is broken; migrate to a modern authenticated cipher."),
     Rule("WEAK-ECB", "ECB mode detected", re.compile(r"MODE_ECB|AES/ECB|[\"']ECB[\"']|aes[^\n]{0,40}ecb", re.I), Severity.HIGH, Confidence.DETECTED, "mode", "Avoid ECB because it reveals repeated data patterns; use an authenticated encryption mode."),
     Rule("SSL-V2V3", "SSLv2 / SSLv3 reference", re.compile(r"SSLv[23]|PROTOCOL_SSLv[23]", re.I), Severity.CRITICAL, Confidence.DETECTED, "tls", "Disable SSLv2 and SSLv3; use a supported TLS version."),
-    Rule("TLS10", "TLS 1.0 reference", re.compile(r"TLSv1(?:\.0)?\b|PROTOCOL_TLSv1\b|TLS1_VERSION", re.I), Severity.HIGH, Confidence.SUSPICIOUS, "tls", "Prefer TLS 1.2 or TLS 1.3 and verify compatibility before removing legacy support."),
+    Rule("TLS10", "TLS 1.0 reference", re.compile(r"\bTLSv1(?:\.0)?(?!\.\d)\b|\bPROTOCOL_TLSv1\b|\bTLS1_VERSION\b", re.I), Severity.HIGH, Confidence.SUSPICIOUS, "tls", "Prefer TLS 1.2 or TLS 1.3 and verify compatibility before removing legacy support."),
     Rule("HARDCODED-KEY", "Possible hardcoded key or secret", re.compile(r"""(?i)(api[_-]?key|secret[_-]?key|private[_-]?key|client[_-]?secret)\s*[:=]\s*(?:"[^"]{8,}"|'[^']{8,}'|[^\s#;]{8,})"""), Severity.CRITICAL, Confidence.SUSPICIOUS, "secrets", "If the value is real, rotate it and move secret material to a secret manager or environment variable."),
     Rule("PRIVATE-KEY-MATERIAL", "Private key material present", re.compile(r"-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----", re.I), Severity.CRITICAL, Confidence.DETECTED, "secrets", "Treat the key as exposed: revoke or rotate it, remove it from active use, and review repository history."),
     Rule("CERTIFICATE-MATERIAL", "X.509 certificate material present", re.compile(r"-----BEGIN CERTIFICATE-----", re.I), Severity.INFO, Confidence.DETECTED, "certificate", "Review the certificate subject, issuer, validity dates, and deployment context."),
@@ -79,9 +80,28 @@ DEFAULT_RULES: list[Rule] = [
 ]
 
 
+SKIP_DIRECTORIES = frozenset({
+    ".git", ".venv", "venv", "node_modules", "__pycache__", ".tox", ".mypy_cache",
+})
+
+
+def is_scannable_path(path: Path) -> bool:
+    """Return whether a path has a supported source, configuration, or certificate extension."""
+    return _extension(path) in SCANNABLE_EXTENSIONS
+
+
+def iter_scannable_files(root: Path) -> Iterator[Path]:
+    """Yield supported files while skipping generated and virtual-environment directories."""
+    for path in root.rglob("*"):
+        if not path.is_file() or any(part in SKIP_DIRECTORIES for part in path.parts):
+            continue
+        if is_scannable_path(path):
+            yield path
+
+
 class CryptoScanner:
     def __init__(self, rules: list[Rule] | None = None) -> None:
-        self.rules = rules or DEFAULT_RULES
+        self.rules = rules if rules is not None else DEFAULT_RULES
 
     def scan_file(self, path: Path) -> list[Finding]:
         findings: list[Finding] = []
@@ -96,7 +116,9 @@ class CryptoScanner:
                 if rule.extensions and _extension(path) not in rule.extensions:
                     continue
                 if rule.pattern.search(line):
-                    evidence = line.strip()[:200]
+                    # Redact the full original line before truncating evidence; truncating first
+                    # can remove a long value's closing quote and defeat the redaction regex.
+                    evidence = line.strip()
                     if rule.id == "HARDCODED-KEY":
                         evidence = re.sub(
                             r"""(?i)(api[_-]?key|secret[_-]?key|private[_-]?key|client[_-]?secret)(\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s#;]+)""",
@@ -105,6 +127,7 @@ class CryptoScanner:
                         )
                     elif rule.id == "PRIVATE-KEY-MATERIAL":
                         evidence = "[REDACTED: private key material detected]"
+                    evidence = evidence[:200]
                     findings.append(
                         Finding(
                             rule_id=rule.id,
@@ -122,12 +145,7 @@ class CryptoScanner:
 
     def scan_directory(self, root: Path) -> list[Finding]:
         findings: list[Finding] = []
-        skip = {".git", ".venv", "venv", "node_modules", "__pycache__", ".tox", ".mypy_cache"}
-        for path in root.rglob("*"):
-            if not path.is_file() or any(part in skip for part in path.parts):
-                continue
-            if _extension(path) not in SCANNABLE_EXTENSIONS:
-                continue
+        for path in iter_scannable_files(root):
             findings.extend(self.scan_file(path))
         return findings
 

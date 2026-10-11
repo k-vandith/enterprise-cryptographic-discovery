@@ -10,6 +10,11 @@ from src.inventory import build_inventory, post_quantum_readiness
 from src.scanner import Finding
 
 
+def _asset_ref(asset_type: str, name: str) -> str:
+    """Return the shared BOM reference used by an inventory component and its findings."""
+    return f"crypto:{asset_type}:{name}".replace(" ", "-")
+
+
 def build_cbom(findings: list[Finding], project_name: str = "ecdat-scan", version: str = "0.1.0") -> dict[str, Any]:
     assets = build_inventory(findings)
     pq = post_quantum_readiness(findings)
@@ -18,7 +23,7 @@ def build_cbom(findings: list[Finding], project_name: str = "ecdat-scan", versio
         components.append({
             "type": "cryptographic-asset",
             "name": a.name,
-            "bom-ref": f"crypto:{a.asset_type}:{a.name}".replace(" ", "-"),
+            "bom-ref": _asset_ref(a.asset_type, a.name),
             "properties": [
                 {"name": "ecdat:category", "value": a.asset_type},
                 {"name": "ecdat:severity_max", "value": a.severity_max},
@@ -46,7 +51,10 @@ def build_cbom(findings: list[Finding], project_name: str = "ecdat-scan", versio
                 "id": f.rule_id, "source": {"name": "ECDAT"}, "description": f.title,
                 "detail": f.evidence,
                 "ratings": [{"severity": f.severity.value, "method": "other"}],
-                "affects": [{"ref": f.file}],
+                "affects": [{"ref": _asset_ref(f.category, f.title)}],
+                "properties": [
+                    {"name": "ecdat:location", "value": f"{f.file}:{f.line}"},
+                ],
             }
             for f in findings if f.severity.value in {"critical", "high"}
         ],
