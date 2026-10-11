@@ -127,3 +127,12 @@ def test_directory_scan_order_is_stable_by_relative_path(tmp_path: Path):
     findings = CryptoScanner().scan_directory(tmp_path)
 
     assert [Path(item.file).name for item in findings] == ["a-first.py", "z-last.py"]
+
+
+
+def test_empty_scan_report_does_not_claim_the_files_are_safe():
+    report = CryptoScanner().to_html([])
+
+    assert "No configured patterns matched" in report
+    assert "not proof" in report
+    assert "cryptographically safe" in report
