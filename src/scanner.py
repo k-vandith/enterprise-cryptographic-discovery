@@ -131,8 +131,22 @@ class CryptoScanner:
             return findings
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
-        except (OSError, UnicodeError):
-            return findings
+        except OSError:
+            # An unreadable file is not a clean scan. Emit an explicit insufficient-
+            # evidence row so the report cannot silently imply full coverage.
+            return [
+                Finding(
+                    rule_id="SCAN-ERROR",
+                    title="File could not be read",
+                    severity=Severity.INFO,
+                    confidence=Confidence.INSUFFICIENT,
+                    file=str(path),
+                    line=0,
+                    evidence="File content was unavailable; cryptographic patterns were not analyzed.",
+                    remediation="Check access permissions and file availability, then rescan.",
+                    category="scan",
+                )
+            ]
         for line_number, line in enumerate(text.splitlines(), 1):
             for rule in self.rules:
                 if rule.extensions and _extension(path) not in rule.extensions:
