@@ -62,6 +62,23 @@ def _extension(path: Path) -> str:
     return ".env" if path.name.lower() == ".env" else path.suffix.lower()
 
 
+_SECRET_ASSIGNMENT_RE = re.compile(
+    r"""(?i)(api[_-]?key|secret[_-]?key|private[_-]?key|client[_-]?secret)(\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s#;]+)"""
+)
+_PRIVATE_KEY_MARKER_RE = re.compile(
+    r"-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----", re.IGNORECASE
+)
+
+
+def _redact_evidence(line: str, limit: int = 200) -> str:
+    """Sanitize evidence before truncation and consistently across all finding rules."""
+    evidence = line.strip()
+    if _PRIVATE_KEY_MARKER_RE.search(evidence):
+        return "[REDACTED: private key material detected]"
+    evidence = _SECRET_ASSIGNMENT_RE.sub(r'\1\2"[REDACTED]"', evidence)
+    return evidence[:limit]
+
+
 DEFAULT_RULES: list[Rule] = [
     Rule("WEAK-MD5", "MD5 hash usage", re.compile(r"\bmd5\b|hashlib\.md5|MessageDigest\.getInstance\([\"']MD5", re.I), Severity.HIGH, Confidence.DETECTED, "hash", "Replace MD5 with SHA-256 or SHA-3."),
     Rule("WEAK-SHA1", "SHA-1 hash usage", re.compile(r"\bsha1\b|hashlib\.sha1|MessageDigest\.getInstance\([\"']SHA-?1", re.I), Severity.MEDIUM, Confidence.DETECTED, "hash", "Prefer SHA-256 or stronger where collision resistance is required."),
@@ -96,15 +113,7 @@ class CryptoScanner:
                 if rule.extensions and _extension(path) not in rule.extensions:
                     continue
                 if rule.pattern.search(line):
-                    evidence = line.strip()[:200]
-                    if rule.id == "HARDCODED-KEY":
-                        evidence = re.sub(
-                            r"""(?i)(api[_-]?key|secret[_-]?key|private[_-]?key|client[_-]?secret)(\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s#;]+)""",
-                            r'\1\2"[REDACTED]"',
-                            evidence,
-                        )
-                    elif rule.id == "PRIVATE-KEY-MATERIAL":
-                        evidence = "[REDACTED: private key material detected]"
+                    evidence = _redact_evidence(line)
                     findings.append(
                         Finding(
                             rule_id=rule.id,
