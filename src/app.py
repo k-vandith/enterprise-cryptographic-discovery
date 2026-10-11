@@ -100,10 +100,7 @@ def _store_scan(root: Path, label: str) -> None:
     scanner = CryptoScanner()
     if root.is_file():
         if not is_scannable_path(root):
-            raise ValueError(
-                f"Unsupported file type for scanning: {root.name}. "
-                "Choose a supported source, configuration, text, or certificate file."
-            )
+            raise ValueError("That file type is not supported. Choose a supported source, configuration, or certificate file.")
         findings = scanner.scan_file(root)
         file_count = 1
         for item in findings:
@@ -476,11 +473,17 @@ def _tls_page() -> None:
         st.markdown("#### Certificates in the latest file scan")
         cert_frame = pd.DataFrame(certificates)
         st.dataframe(cert_frame, hide_index=True, use_container_width=True)
-        soon = [item for item in certificates if int(item.get("days_to_expiry", 99999)) < 30]
+        not_yet_valid = [item for item in certificates if item.get("status") == "Not yet valid"]
+        soon = [
+            item for item in certificates
+            if item.get("status") != "Not yet valid" and int(item.get("days_to_expiry", 99999)) < 30
+        ]
+        if not_yet_valid:
+            st.warning(f"{len(not_yet_valid)} certificate(s) are not yet valid. Check the certificate dates and system clock before deployment.")
         if soon:
             st.warning(f"{len(soon)} certificate(s) are expired or due to expire within 30 days. Confirm renewal owners and deployment coverage.")
-        else:
-            st.success("No uploaded certificate in this scan is expired or inside the 30-day renewal window.")
+        if not not_yet_valid and not soon:
+            st.success("No uploaded certificate is expired, not-yet-valid, or inside the 30-day renewal window.")
         st.caption("Expiry comes from the certificate's encoded validity date. Confirm it against the deployed certificate and renewal process.")
     else:
         st.info("No local X.509 certificate metadata in the latest scan. Upload a PEM, CRT, CER, or DER certificate on the Scan files page.")
@@ -555,6 +558,23 @@ def _tls_page() -> None:
             st.caption("Connection failures may reflect DNS, firewall, certificate trust, protocol negotiation, or endpoint availability. Check the detailed note per host.")
 
 
+def _neutralize_csv_value(value: object) -> object:
+    """Make untrusted text cells inert when a CSV is opened in spreadsheet software."""
+    if not isinstance(value, str):
+        return value
+    trimmed = value.lstrip(" \t\r\n")
+    if value.startswith(("\t", "\r", "\n")) or (trimmed and trimmed[0] in "=+-@"):
+        return "'" + value
+    return value
+
+
+def _safe_csv_export(frame: pd.DataFrame) -> bytes:
+    safe = frame.copy()
+    for column in safe.columns:
+        safe[column] = safe[column].map(_neutralize_csv_value)
+    return safe.to_csv(index=False).encode("utf-8")
+
+
 def _findings_page(findings: list[Finding]) -> None:
     _page_intro(
         "Findings",
@@ -606,7 +626,7 @@ def _findings_page(findings: list[Finding]) -> None:
         takeaway += "No rows match the current filters."
     st.markdown(f"<div class='cs-note'><b>Key takeaway</b><br>{html.escape(takeaway)}</div>", unsafe_allow_html=True)
     st.download_button(
-        "Download filtered findings CSV", view.to_csv(index=False).encode("utf-8"),
+        "Download filtered findings CSV", _safe_csv_export(view),
         file_name="cipherscope-findings.csv", mime="text/csv",
         help="Exports only the currently visible, filtered findings. Secret values detected by the scanner are redacted.",
     )
