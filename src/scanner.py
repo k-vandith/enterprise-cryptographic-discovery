@@ -190,7 +190,7 @@ class CryptoScanner:
             f"<div class='metric'><span class='muted'>{_esc(level.title())}</span><b>{counts[level]}</b></div>"
             for level in ("critical", "high", "medium", "low", "info")
         )
-        table_rows = "".join(rows) or '<tr><td colspan="6">No matching patterns were found in the scanned files.</td></tr>'
+        table_rows = "".join(rows) or '<tr><td colspan="6">No configured patterns matched. This is not proof that the code or files are cryptographically safe.</td></tr>'
         return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{escaped_title}</title>
