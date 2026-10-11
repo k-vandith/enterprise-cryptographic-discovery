@@ -136,3 +136,23 @@ def test_empty_scan_report_does_not_claim_the_files_are_safe():
     assert "No configured patterns matched" in report
     assert "not proof" in report
     assert "cryptographically safe" in report
+
+
+
+def test_unreadable_file_is_reported_as_not_scanned(tmp_path: Path, monkeypatch):
+    source = tmp_path / "locked.py"
+    source.write_text("hashlib.md5(data)\n", encoding="utf-8")
+    original = Path.read_text
+
+    def denied(path: Path, *args, **kwargs):
+        if path == source:
+            raise PermissionError("test permission error")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", denied)
+    findings = CryptoScanner().scan_file(source)
+
+    assert len(findings) == 1
+    assert findings[0].rule_id == "SCAN-ERROR"
+    assert findings[0].confidence == Confidence.INSUFFICIENT
+    assert "not analyzed" in findings[0].evidence
