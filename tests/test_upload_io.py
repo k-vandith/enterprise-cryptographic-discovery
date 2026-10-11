@@ -112,17 +112,61 @@ def test_redacts_unquoted_env_secret_and_private_key_material(tmp_path: Path) ->
 
 
 
-def test_rejects_duplicate_zip_paths_without_overwriting_first_entry(tmp_path: Path) -> None:
+def test_zip_upload_never_overwrites_an_individual_upload_with_the_same_name(tmp_path: Path) -> None:
     data = io.BytesIO()
-    first_contents = b"import hashlib\nhashlib.md5(b'demo')\n"
     with zipfile.ZipFile(data, "w") as archive:
+        archive.writestr("same.py", "import hashlib\nhashlib.sha1(b'zip')\n")
+
+    paths = stage_uploads(
+        [
+            FakeUpload("same.py", b"import hashlib\nhashlib.md5(b'individual')\n"),
+            FakeUpload("project.zip", data.getvalue()),
+        ],
+        tmp_path / "stage-collision",
+    )
+
+    assert len(paths) == 2
+    assert {path.name for path in paths} == {"same.py", "same-2.py"}
+    contents = {path.name: path.read_text(encoding="utf-8") for path in paths}
+    assert "hashlib.md5" in contents["same.py"]
+    assert "hashlib.sha1" in contents["same-2.py"]
+
+
+def test_certificate_that_starts_in_future_is_not_marked_active(tmp_path: Path) -> None:
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "future.training.invalid")])
+    now = datetime.now(timezone.utc)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before((now + timedelta(days=2)).replace(tzinfo=None))
+        .not_valid_after((now + timedelta(days=45)).replace(tzinfo=None))
+        .sign(key, hashes.SHA256())
+    )
+    cert_file = tmp_path / "future.crt"
+    cert_file.write_bytes(cert.public_bytes(Encoding.PEM))
+
+    results = inspect_certificates([cert_file])
+
+    assert len(results) == 1
+    assert results[0]["status"] == "Not yet valid"
+
+
+
+def test_zip_duplicate_paths_keep_both_entries_without_overwriting(tmp_path: Path) -> None:
+    payload = io.BytesIO()
+    first_contents = b"import hashlib\nhashlib.md5(b'first')\n"
+    second_contents = b"print('second')\n"
+    with zipfile.ZipFile(payload, "w") as archive:
         archive.writestr("service.py", first_contents)
         with pytest.warns(UserWarning, match="Duplicate name"):
-            archive.writestr("service.py", "print('safe')\n")
+            archive.writestr("service.py", second_contents)
 
-    destination = tmp_path / "stage"
-    with pytest.raises(ValueError, match="Duplicate upload path"):
-        stage_uploads([FakeUpload("project.zip", data.getvalue())], destination)
+    staged = stage_uploads([FakeUpload("project.zip", payload.getvalue())], tmp_path / "zip-stage")
+    by_name = {path.name: path.read_bytes() for path in staged}
 
-    staged_file = destination / "service.py"
-    assert staged_file.read_bytes() == first_contents
+    assert by_name["service.py"] == first_contents
+    assert by_name["service-2.py"] == second_contents
