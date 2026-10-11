@@ -24,3 +24,40 @@ def test_json_html(tmp_path: Path):
     assert "WEAK-SHA1" in js
     html = sc.to_html(findings)
     assert "<table>" in html
+
+
+
+def test_secret_evidence_is_redacted_for_overlapping_rules_and_long_lines(tmp_path: Path):
+    secret = "unique-training-secret-should-never-appear-in-evidence"
+    short_file = tmp_path / "short.py"
+    short_file.write_text(
+        f'API_KEY = "{secret}"  # random.random()\n', encoding="utf-8"
+    )
+    findings = CryptoScanner().scan_file(short_file)
+    assert {item.rule_id for item in findings} >= {"HARDCODED-KEY", "RANDOM-WEAK"}
+    assert all(secret not in item.evidence for item in findings)
+    assert all("[REDACTED]" in item.evidence for item in findings)
+
+    long_secret = "LONG_SECRET_SENTINEL_" + ("x" * 300)
+    long_file = tmp_path / "long.py"
+    long_file.write_text(
+        f'API_KEY = "{long_secret}"  # random.random()\n', encoding="utf-8"
+    )
+    long_findings = CryptoScanner().scan_file(long_file)
+    assert {item.rule_id for item in long_findings} >= {"HARDCODED-KEY", "RANDOM-WEAK"}
+    assert all(long_secret not in item.evidence for item in long_findings)
+    assert all("[REDACTED]" in item.evidence for item in long_findings)
+
+
+def test_private_key_marker_is_redacted_for_overlapping_rules(tmp_path: Path):
+    source = tmp_path / "key.py"
+    source.write_text(
+        'private_key = "-----BEGIN PRIVATE KEY-----"  # random.random()\n',
+        encoding="utf-8",
+    )
+    findings = CryptoScanner().scan_file(source)
+    assert {item.rule_id for item in findings} >= {
+        "HARDCODED-KEY", "PRIVATE-KEY-MATERIAL", "RANDOM-WEAK"
+    }
+    assert all("BEGIN PRIVATE KEY" not in item.evidence for item in findings)
+    assert all("random.random()" not in item.evidence for item in findings)
