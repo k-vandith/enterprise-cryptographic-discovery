@@ -100,6 +100,10 @@ def _extract_zip(payload: bytes, root: Path) -> list[Path]:
     staged: list[Path] = []
     total = 0
     members = archive.infolist()
+    existing_paths = {
+        item.relative_to(root).as_posix().casefold()
+        for item in root.rglob("*") if item.is_file()
+    }
     if len(members) > MAX_ARCHIVE_FILES:
         raise ValueError(f"The archive contains more than {MAX_ARCHIVE_FILES:,} entries.")
 
@@ -113,6 +117,13 @@ def _extract_zip(payload: bytes, root: Path) -> list[Path]:
             relative = _safe_relative_path(item.filename)
             if _file_extension(relative.name) not in SCANNABLE_EXTENSIONS:
                 continue
+            relative_key = relative.as_posix().casefold()
+            if relative_key in existing_paths or (root / relative).exists():
+                raise ValueError(
+                    f"Duplicate upload path: {relative.as_posix()!r}. "
+                    "Remove duplicate paths and try again."
+                )
+            existing_paths.add(relative_key)
             if item.file_size > MAX_FILE_BYTES:
                 raise ValueError(f"{relative.name} exceeds the 25 MB per-file limit.")
             total += item.file_size
