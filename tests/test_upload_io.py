@@ -117,7 +117,8 @@ def test_rejects_duplicate_zip_paths_without_overwriting_first_entry(tmp_path: P
     first_contents = b"import hashlib\nhashlib.md5(b'demo')\n"
     with zipfile.ZipFile(data, "w") as archive:
         archive.writestr("service.py", first_contents)
-        archive.writestr("service.py", "print('safe')\n")
+        with pytest.warns(UserWarning, match="Duplicate name"):
+            archive.writestr("service.py", "print('safe')\n")
 
     destination = tmp_path / "stage"
     with pytest.raises(ValueError, match="Duplicate upload path"):
