@@ -63,30 +63,6 @@ def _extension(path: Path) -> str:
     return ".env" if path.name.lower() == ".env" else path.suffix.lower()
 
 
-SKIP_DIRECTORY_NAMES = frozenset(
-    {".git", ".venv", "venv", "node_modules", "__pycache__", ".tox", ".mypy_cache"}
-)
-
-
-def is_scannable_path(path: Path) -> bool:
-    """Return whether a file's extension is supported by the scanner."""
-    return _extension(path) in SCANNABLE_EXTENSIONS
-
-
-def iter_scannable_files(root: Path) -> Iterator[Path]:
-    """Yield supported files while skipping dependency folders relative to the scan root."""
-    for path in root.rglob("*"):
-        if not path.is_file() or not is_scannable_path(path):
-            continue
-        try:
-            relative = path.relative_to(root)
-        except ValueError:
-            relative = path
-        if any(part in SKIP_DIRECTORY_NAMES for part in relative.parts[:-1]):
-            continue
-        yield path
-
-
 _SECRET_ASSIGNMENT_RE = re.compile(
     r"""(?i)(api[_-]?key|secret[_-]?key|private[_-]?key|client[_-]?secret)(\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s#;]+)"""
 )
@@ -96,7 +72,7 @@ _PRIVATE_KEY_MARKER_RE = re.compile(
 
 
 def _redact_evidence(line: str, limit: int = 200) -> str:
-    """Sanitize evidence before truncation and consistently across all finding rules."""
+    """Sanitize sensitive context before truncation and for every rule matching a line."""
     evidence = line.strip()
     if _PRIVATE_KEY_MARKER_RE.search(evidence):
         return "[REDACTED: private key material detected]"
@@ -111,9 +87,9 @@ DEFAULT_RULES: list[Rule] = [
     Rule("WEAK-RC4", "RC4 stream cipher", re.compile(r"\bRC4\b|ARC4|arcfour", re.I), Severity.CRITICAL, Confidence.DETECTED, "cipher", "RC4 is broken; migrate to a modern authenticated cipher."),
     Rule("WEAK-ECB", "ECB mode detected", re.compile(r"MODE_ECB|AES/ECB|[\"']ECB[\"']|aes[^\n]{0,40}ecb", re.I), Severity.HIGH, Confidence.DETECTED, "mode", "Avoid ECB because it reveals repeated data patterns; use an authenticated encryption mode."),
     Rule("SSL-V2V3", "SSLv2 / SSLv3 reference", re.compile(r"SSLv[23]|PROTOCOL_SSLv[23]", re.I), Severity.CRITICAL, Confidence.DETECTED, "tls", "Disable SSLv2 and SSLv3; use a supported TLS version."),
-    Rule("TLS10", "TLS 1.0 reference", re.compile(r"TLSv1(?:\.0)?\b|PROTOCOL_TLSv1\b|TLS1_VERSION", re.I), Severity.HIGH, Confidence.SUSPICIOUS, "tls", "Prefer TLS 1.2 or TLS 1.3 and verify compatibility before removing legacy support."),
+    Rule("TLS10", "TLS 1.0 reference", re.compile(r"\bTLSv1(?:\.0)?(?!\.\d)\b|\bPROTOCOL_TLSv1\b|\bTLS1_VERSION\b", re.I), Severity.HIGH, Confidence.SUSPICIOUS, "tls", "Prefer TLS 1.2 or TLS 1.3 and verify compatibility before removing legacy support."),
     Rule("HARDCODED-KEY", "Possible hardcoded key or secret", re.compile(r"""(?i)(api[_-]?key|secret[_-]?key|private[_-]?key|client[_-]?secret)\s*[:=]\s*(?:"[^"]{8,}"|'[^']{8,}'|[^\s#;]{8,})"""), Severity.CRITICAL, Confidence.SUSPICIOUS, "secrets", "If the value is real, rotate it and move secret material to a secret manager or environment variable."),
-    Rule("PRIVATE-KEY-MATERIAL", "Private key material present", re.compile(r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----", re.I), Severity.CRITICAL, Confidence.DETECTED, "secrets", "Treat the key as exposed: revoke or rotate it, remove it from active use, and review repository history."),
+    Rule("PRIVATE-KEY-MATERIAL", "Private key material present", _PRIVATE_KEY_MARKER_RE, Severity.CRITICAL, Confidence.DETECTED, "secrets", "Treat the key as exposed: revoke or rotate it, remove it from active use, and review repository history."),
     Rule("CERTIFICATE-MATERIAL", "X.509 certificate material present", re.compile(r"-----BEGIN CERTIFICATE-----", re.I), Severity.INFO, Confidence.DETECTED, "certificate", "Review the certificate subject, issuer, validity dates, and deployment context."),
     Rule("RSA-1024", "RSA key size ≤ 1024", re.compile(r"RSA.*(1024|512)|key_size\s*=\s*(512|1024)", re.I), Severity.HIGH, Confidence.SUSPICIOUS, "asymmetric", "Use RSA at 2048 bits or stronger, or evaluate an appropriate modern alternative."),
     Rule("CRYPTO-LIB", "Cryptographic library reference", re.compile(r"from cryptography|import crypto|require\(['\"]crypto|javax\.crypto|openssl", re.I), Severity.INFO, Confidence.DETECTED, "library", "Inventory this dependency and confirm that it is supported and securely configured."),
@@ -121,13 +97,37 @@ DEFAULT_RULES: list[Rule] = [
 ]
 
 
+SKIP_DIRECTORIES = frozenset({
+    ".git", ".venv", "venv", "node_modules", "__pycache__", ".tox", ".mypy_cache",
+})
+
+
+def is_scannable_path(path: Path) -> bool:
+    """Return whether a path has a supported source, configuration, or certificate extension."""
+    return _extension(path) in SCANNABLE_EXTENSIONS
+
+
+def iter_scannable_files(root: Path) -> Iterator[Path]:
+    """Yield supported files while skipping generated folders within the selected scan root."""
+    for path in root.rglob("*"):
+        if not path.is_file() or not is_scannable_path(path):
+            continue
+        try:
+            relative = path.relative_to(root)
+        except ValueError:
+            relative = path
+        if any(part in SKIP_DIRECTORIES for part in relative.parts[:-1]):
+            continue
+        yield path
+
+
 class CryptoScanner:
     def __init__(self, rules: list[Rule] | None = None) -> None:
-        self.rules = rules or DEFAULT_RULES
+        self.rules = rules if rules is not None else DEFAULT_RULES
 
     def scan_file(self, path: Path) -> list[Finding]:
         findings: list[Finding] = []
-        if not is_scannable_path(path):
+        if _extension(path) not in SCANNABLE_EXTENSIONS:
             return findings
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
