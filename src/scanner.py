@@ -4,6 +4,7 @@ from __future__ import annotations
 import html
 import json
 import re
+from collections.abc import Iterator
 from dataclasses import asdict, dataclass
 from enum import Enum
 from pathlib import Path
@@ -62,6 +63,30 @@ def _extension(path: Path) -> str:
     return ".env" if path.name.lower() == ".env" else path.suffix.lower()
 
 
+SKIP_DIRECTORY_NAMES = frozenset(
+    {".git", ".venv", "venv", "node_modules", "__pycache__", ".tox", ".mypy_cache"}
+)
+
+
+def is_scannable_path(path: Path) -> bool:
+    """Return whether a file's extension is supported by the scanner."""
+    return _extension(path) in SCANNABLE_EXTENSIONS
+
+
+def iter_scannable_files(root: Path) -> Iterator[Path]:
+    """Yield supported files while skipping dependency folders relative to the scan root."""
+    for path in root.rglob("*"):
+        if not path.is_file() or not is_scannable_path(path):
+            continue
+        try:
+            relative = path.relative_to(root)
+        except ValueError:
+            relative = path
+        if any(part in SKIP_DIRECTORY_NAMES for part in relative.parts[:-1]):
+            continue
+        yield path
+
+
 _SECRET_ASSIGNMENT_RE = re.compile(
     r"""(?i)(api[_-]?key|secret[_-]?key|private[_-]?key|client[_-]?secret)(\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s#;]+)"""
 )
@@ -102,7 +127,7 @@ class CryptoScanner:
 
     def scan_file(self, path: Path) -> list[Finding]:
         findings: list[Finding] = []
-        if _extension(path) not in SCANNABLE_EXTENSIONS:
+        if not is_scannable_path(path):
             return findings
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
@@ -131,12 +156,7 @@ class CryptoScanner:
 
     def scan_directory(self, root: Path) -> list[Finding]:
         findings: list[Finding] = []
-        skip = {".git", ".venv", "venv", "node_modules", "__pycache__", ".tox", ".mypy_cache"}
-        for path in root.rglob("*"):
-            if not path.is_file() or any(part in skip for part in path.parts):
-                continue
-            if _extension(path) not in SCANNABLE_EXTENSIONS:
-                continue
+        for path in iter_scannable_files(root):
             findings.extend(self.scan_file(path))
         return findings
 
