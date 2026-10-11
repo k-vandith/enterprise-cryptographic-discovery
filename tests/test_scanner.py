@@ -161,7 +161,7 @@ def test_unreadable_file_is_reported_as_not_scanned(tmp_path: Path, monkeypatch)
 
 def test_oversized_path_scan_is_reported_as_not_analyzed(tmp_path: Path, monkeypatch):
     source = tmp_path / "large.py"
-    source.write_text("x", encoding="utf-8")
+    source.write_text("x" * 9, encoding="utf-8")
     monkeypatch.setattr("src.scanner.MAX_SCAN_FILE_BYTES", 8)
 
     findings = CryptoScanner().scan_file(source)
