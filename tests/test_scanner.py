@@ -1,5 +1,5 @@
 from pathlib import Path
-from src.scanner import CryptoScanner, Severity
+from src.scanner import CryptoScanner, Severity, is_scannable_path, iter_scannable_files
 
 
 def test_scan_md5(tmp_path: Path):
@@ -52,14 +52,14 @@ def test_secret_evidence_is_redacted_for_overlapping_rules_and_long_lines(tmp_pa
 def test_private_key_marker_is_redacted_for_overlapping_rules(tmp_path: Path):
     source = tmp_path / "key.py"
     source.write_text(
-        'private_key = "-----BEGIN PRIVATE KEY-----"  # random.random()\n',
+        'private_key = "-----BEGIN ENCRYPTED PRIVATE KEY-----"  # random.random()\n',
         encoding="utf-8",
     )
     findings = CryptoScanner().scan_file(source)
     assert {item.rule_id for item in findings} >= {
         "HARDCODED-KEY", "PRIVATE-KEY-MATERIAL", "RANDOM-WEAK"
     }
-    assert all("BEGIN PRIVATE KEY" not in item.evidence for item in findings)
+    assert all("ENCRYPTED PRIVATE KEY" not in item.evidence for item in findings)
     assert all("random.random()" not in item.evidence for item in findings)
 
 
