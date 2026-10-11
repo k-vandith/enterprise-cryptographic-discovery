@@ -73,3 +73,47 @@ def test_scannable_file_iterator_counts_env_and_skips_generated_directories(tmp_
 
     assert actual == {".env", "main.py"}
     assert is_scannable_path(tmp_path / ".env")
+
+
+
+def test_secret_evidence_is_redacted_for_overlapping_rules_and_long_lines(tmp_path: Path):
+    secret = "LONG_SECRET_SENTINEL_" + ("x" * 300)
+    source = tmp_path / "overlapping.py"
+    source.write_text(f'API_KEY = "{secret}"  # random.random()\n', encoding="utf-8")
+
+    findings = CryptoScanner().scan_file(source)
+    assert {item.rule_id for item in findings} >= {"HARDCODED-KEY", "RANDOM-WEAK"}
+    assert all(secret not in item.evidence for item in findings)
+    assert all("[REDACTED]" in item.evidence for item in findings)
+
+
+def test_encrypted_private_key_marker_is_redacted_for_every_matching_rule(tmp_path: Path):
+    source = tmp_path / "encrypted-key.py"
+    source.write_text(
+        'private_key = "-----BEGIN ENCRYPTED PRIVATE KEY-----"  # random.random()\n',
+        encoding="utf-8",
+    )
+
+    findings = CryptoScanner().scan_file(source)
+    assert {item.rule_id for item in findings} >= {
+        "HARDCODED-KEY", "PRIVATE-KEY-MATERIAL", "RANDOM-WEAK"
+    }
+    assert all("ENCRYPTED PRIVATE KEY" not in item.evidence for item in findings)
+    assert all("random.random()" not in item.evidence for item in findings)
+
+
+def test_directory_scan_is_relative_to_selected_root_even_when_parent_is_named_venv(tmp_path: Path):
+    root = tmp_path / "venv" / "project"
+    (root / "src").mkdir(parents=True)
+    (root / ".venv").mkdir()
+    (root / ".env").write_text('API_KEY="training-secret-value-123456"\n', encoding="utf-8")
+    (root / "src" / "auth.py").write_text("hashlib.md5(b'demo')\n", encoding="utf-8")
+    (root / ".venv" / "ignored.py").write_text("hashlib.md5(b'ignored')\n", encoding="utf-8")
+    (root / "notes.exe").write_text("hashlib.md5(b'unsupported')\n", encoding="utf-8")
+
+    paths = {path.relative_to(root).as_posix() for path in iter_scannable_files(root)}
+    assert paths == {".env", "src/auth.py"}
+    findings = CryptoScanner().scan_directory(root)
+    assert any(item.rule_id == "HARDCODED-KEY" and item.file.endswith(".env") for item in findings)
+    assert any(item.rule_id == "WEAK-MD5" and item.file.endswith("auth.py") for item in findings)
+    assert all("ignored.py" not in item.file for item in findings)

@@ -153,3 +153,20 @@ def test_certificate_that_starts_in_future_is_not_marked_active(tmp_path: Path) 
 
     assert len(results) == 1
     assert results[0]["status"] == "Not yet valid"
+
+
+
+def test_zip_duplicate_paths_keep_both_entries_without_overwriting(tmp_path: Path) -> None:
+    payload = io.BytesIO()
+    first_contents = b"import hashlib\nhashlib.md5(b'first')\n"
+    second_contents = b"print('second')\n"
+    with zipfile.ZipFile(payload, "w") as archive:
+        archive.writestr("service.py", first_contents)
+        with pytest.warns(UserWarning, match="Duplicate name"):
+            archive.writestr("service.py", second_contents)
+
+    staged = stage_uploads([FakeUpload("project.zip", payload.getvalue())], tmp_path / "zip-stage")
+    by_name = {path.name: path.read_bytes() for path in staged}
+
+    assert by_name["service.py"] == first_contents
+    assert by_name["service-2.py"] == second_contents
