@@ -109,3 +109,19 @@ def test_redacts_unquoted_env_secret_and_private_key_material(tmp_path: Path) ->
     private_key = next(item for item in key_findings if item.rule_id == "PRIVATE-KEY-MATERIAL")
     assert "SECRET_PRIVATE_KEY_BODY" not in private_key.evidence
     assert "REDACTED" in private_key.evidence
+
+
+
+def test_rejects_duplicate_zip_paths_without_overwriting_first_entry(tmp_path: Path) -> None:
+    data = io.BytesIO()
+    first_contents = b"import hashlib\nhashlib.md5(b'demo')\n"
+    with zipfile.ZipFile(data, "w") as archive:
+        archive.writestr("service.py", first_contents)
+        archive.writestr("service.py", "print('safe')\n")
+
+    destination = tmp_path / "stage"
+    with pytest.raises(ValueError, match="Duplicate upload path"):
+        stage_uploads([FakeUpload("project.zip", data.getvalue())], destination)
+
+    staged_file = destination / "service.py"
+    assert staged_file.read_bytes() == first_contents
