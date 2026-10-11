@@ -117,3 +117,13 @@ def test_directory_scan_is_relative_to_selected_root_even_when_parent_is_named_v
     assert any(item.rule_id == "HARDCODED-KEY" and item.file.endswith(".env") for item in findings)
     assert any(item.rule_id == "WEAK-MD5" and item.file.endswith("auth.py") for item in findings)
     assert all("ignored.py" not in item.file for item in findings)
+
+
+
+def test_directory_scan_order_is_stable_by_relative_path(tmp_path: Path):
+    (tmp_path / "z-last.py").write_text("hashlib.md5(b'x')\n", encoding="utf-8")
+    (tmp_path / "a-first.py").write_text("hashlib.sha1(b'x')\n", encoding="utf-8")
+
+    findings = CryptoScanner().scan_directory(tmp_path)
+
+    assert [Path(item.file).name for item in findings] == ["a-first.py", "z-last.py"]
